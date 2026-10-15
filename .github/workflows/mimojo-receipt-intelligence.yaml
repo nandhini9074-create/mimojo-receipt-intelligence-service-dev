@@ -1,0 +1,55 @@
+name: mimojo-receipt-intelligence-service
+
+on:
+  push:
+  pull_request:
+    branches: [dev]
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  packages: read
+  id-token: write
+  issues: write
+  actions: read
+jobs:
+  transform-local-files:
+    name: Transform Files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Upload Transformed Files
+        uses: actions/upload-artifact@v6
+        with:
+          name: transformed-files
+          path: |
+            README.md
+
+
+  build-and-deploy:
+    needs: transform-local-files
+    uses: mojosoln/gh-shared-templates/.github/workflows/build-and-deploy-template-hw.yml@main
+    with:
+      deployment_name: "mimojo-receipt-intelligence-service"
+      image_name: "mimojo-receipt-intelligence-service"
+      env_secrets: "mimojo-receipt-intelligence-service-env-file"
+      dockerfile: "Dockerfile"
+      profile: javascript
+
+    secrets:
+      ACR_TOKEN: ${{ secrets.ACR_TOKEN }}
+      ACR_TOKEN_PROD: ${{ secrets.ACR_TOKEN_PROD }}
+      AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      HW_ACCESS_KEY: ${{ secrets.HW_ACCESS_KEY }}
+      HW_SECRET_KEY: ${{ secrets.HW_SECRET_KEY }}
+      SWR_USERNAME: ${{ secrets.SWR_USERNAME }}
+      SWR_PASSWORD: ${{ secrets.SWR_PASSWORD }}
+      HW_DEV_DB_PASSWORD: ${{ secrets.HW_DEV_DB_PASSWORD }}
+      HW_STAGE_DB_PASSWORD: ${{ secrets.HW_STAGE_DB_PASSWORD }}
+      HW_PROD_DB_PASSWORD: ${{ secrets.HW_PROD_DB_PASSWORD }}
+      HW_DEV_CCE_CLUSTER_KUBECONFIG: ${{ secrets.HW_DEV_CCE_CLUSTER_KUBECONFIG }}
+      HW_STAGE_CCE_CLUSTER_KUBECONFIG: ${{ secrets.HW_STAGE_CCE_CLUSTER_KUBECONFIG }}
+      HW_PRELIVE_CCE_CLUSTER_KUBECONFIG: ${{ secrets.HW_PRELIVE_CCE_CLUSTER_KUBECONFIG }}
+      HW_PROD_CCE_CLUSTER_KUBECONFIG: ${{ secrets.HW_PROD_CCE_CLUSTER_KUBECONFIG }}
