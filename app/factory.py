@@ -7,6 +7,7 @@ from app.config import Settings, get_settings
 from app.db import Base, make_engine, make_session_factory
 from app.api.receipts import router as receipts_router
 from app.services.document_intelligence import DocumentIntelligenceOcr
+from app.services.ocr_log_processor import OcrLogProcessor
 from app.services.receipt_extractor import ReceiptExtractor
 from app.services.receipt_processor import ReceiptProcessor
 from app.tracer import (
@@ -51,6 +52,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.session_factory = session_factory
     app.state.processor = ReceiptProcessor(
+        ocr=DocumentIntelligenceOcr(settings),
+        extractor=ReceiptExtractor(settings),
+        session_factory=session_factory,
+    )
+    app.state.ocr_log_processor = OcrLogProcessor(
         ocr=DocumentIntelligenceOcr(settings),
         extractor=ReceiptExtractor(settings),
         session_factory=session_factory,

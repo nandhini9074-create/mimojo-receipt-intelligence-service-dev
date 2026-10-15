@@ -6,6 +6,9 @@ from app.services.errors import ProcessingError
 from app.services.receipt_processor import ReceiptProcessor
 
 
+from app.models.ocr_log_model import OcrLog
+
+
 class RecordingOcr:
     def __init__(self):
         self.urls: list[str] = []
@@ -37,6 +40,8 @@ def _client(sas_token: str = "sig=env") -> TestClient:
     return TestClient(app)
 
 
+
+
 def test_post_accepts_the_slip_and_finishes_ocr_in_the_background():
     app = create_app(Settings(database_url="sqlite://", blob_sas_token="sig=env"))
     ocr = RecordingOcr()
@@ -63,6 +68,18 @@ def test_post_accepts_the_slip_and_finishes_ocr_in_the_background():
     assert stored.json()["evidence_ready"] is True
     assert stored.json()["mid"] == "M1"
     assert stored.json()["card_last4"] == "4242"
+
+    # Verify that ocr_logs table was also populated in the same flow
+    session = app.state.session_factory()
+    ocr_logs = session.query(OcrLog).all()
+    assert len(ocr_logs) == 1
+    ocr_log = ocr_logs[0]
+    assert ocr_log.image_url == "https://storage.example/receipts/receipt-123.pdf"
+    assert ocr_log.status == "SUCCESS"
+    assert ocr_log.stage == "completed"
+    assert ocr_log.duration_ms is not None
+    assert ocr_log.extracted_data["mid"] == "M1"
+    session.close()
 
 
 def test_post_rejects_a_jira_ticket_id_that_is_not_a_uuid():
@@ -122,3 +139,11 @@ def test_background_failure_is_visible_on_the_saved_row():
     assert created.json()["evidence_file_url"] == "https://storage.example/receipt.pdf"
     assert stored.json()["evidence_ready"] is False
     assert stored.json()["extracted_data"]["stage"] == "ocr"
+
+    session = app.state.session_factory()
+    ocr_logs = session.query(OcrLog).all()
+    assert len(ocr_logs) == 1
+    assert ocr_logs[0].status == "FAILED"
+    assert ocr_logs[0].error_stage == "ocr"
+    assert ocr_logs[0].extracted_data["stage"] == "ocr"
+    session.close()

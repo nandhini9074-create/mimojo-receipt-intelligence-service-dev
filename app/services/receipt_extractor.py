@@ -59,12 +59,21 @@ card_last4 is the last four digits only. scheme is the card network.
 confidence is your overall confidence from 0 to 1.
 """
 
+OCR_LOG_SYSTEM_PROMPT = """You extract fields from a payment terminal transaction slip.
+Use only the OCR text. Leave a field null when it is not printed. Do not guess or calculate missing values.
+txn_amount is a JSON number. currency is a 3-letter ISO code such as AED.
+txn_date should be ISO-8601 when the slip has both a date and a time.
+card_last4 is the last four digits of any payment card printed.
+scheme is the payment card network or brand printed on the slip, including Visa, Mastercard, American Express, Discover, Diners Club, JCB, UnionPay, RuPay, or any other debit/credit card scheme.
+confidence is your overall confidence from 0 to 1.
+"""
+
 
 class ReceiptExtractor:
     def __init__(self, settings: Settings):
         self._settings = settings
 
-    def extract(self, ocr_text: str) -> dict:
+    def extract(self, ocr_text: str, system_prompt: str | None = None) -> dict:
         if not (
             self._settings.azure_openai_endpoint
             and self._settings.azure_openai_api_key
@@ -79,7 +88,8 @@ class ReceiptExtractor:
             api_key=self._settings.azure_openai_api_key,
             api_version=self._settings.azure_openai_api_version,
         )
-        content = self._complete(client, ocr_text)
+        prompt = system_prompt or _SYSTEM_PROMPT
+        content = self._complete(client, ocr_text, system_prompt=prompt)
         payload = _parse_json(content)
         log.info(
             "[Extraction] azure openai finished",
@@ -91,9 +101,9 @@ class ReceiptExtractor:
         )
         return payload
 
-    def _complete(self, client: AzureOpenAI, ocr_text: str) -> str:
+    def _complete(self, client: AzureOpenAI, ocr_text: str, system_prompt: str = _SYSTEM_PROMPT) -> str:
         messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": ocr_text},
         ]
         try:
