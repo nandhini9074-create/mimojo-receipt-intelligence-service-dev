@@ -20,6 +20,13 @@ class ReceiptAccepted(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ReceiptAcceptedResponse(BaseModel):
+    statusCode: int = 200
+    message: str = "Success"
+    data: ReceiptAccepted
+
+
+
 class ReceiptEvidenceView(BaseModel):
     id: uuid.UUID
     jira_ticket_id: uuid.UUID

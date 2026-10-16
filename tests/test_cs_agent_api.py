@@ -43,7 +43,7 @@ def _client(sas_token: str = "sig=env") -> TestClient:
     return TestClient(app)
 
 
-def test_post_cs_agent_receipt_accepts_and_processes_in_background():
+def test_post_cs_agent_receipt_processes_synchronously():
     app = create_app(Settings(database_url="sqlite://", blob_sas_token="sig=env"))
     ocr = RecordingOcr()
     extractor = RecordingExtractor()
@@ -55,23 +55,34 @@ def test_post_cs_agent_receipt_accepts_and_processes_in_background():
                 "image_blob_url": "https://storage.example/receipts/cs-receipt.pdf",
             },
         )
-        assert response.status_code == 202
+        assert response.status_code == 200
         body = response.json()
-        assert body["status"] == "PENDING"
-        assert body["stage"] == "intake"
-        assert body["image_url"] == "https://storage.example/receipts/cs-receipt.pdf"
+        assert body["statusCode"] == 200
+        assert body["message"] == "Success"
+        data = body["data"]
+        assert data["status"] == "SUCCESS"
+        assert data["stage"] == "completed"
+        assert data["image_url"] == "https://storage.example/receipts/cs-receipt.pdf"
+        assert data["duration_ms"] is not None
+        assert "data" not in data
+        assert data["extracted_data"]["scheme"] == "American Express"
+        assert data["extracted_data"]["card_last4"] == "1234"
         assert ocr.urls == ["https://storage.example/receipts/cs-receipt.pdf?sig=env"]
+        assert extractor.captured_prompt == OCR_LOG_SYSTEM_PROMPT
 
-        stored = client.get(f"/api/v1/cs-agent/receipts/{body['id']}")
+        stored = client.get(f"/api/v1/cs-agent/receipts/{data['id']}")
 
     assert stored.status_code == 200
     stored_body = stored.json()
-    assert stored_body["status"] == "SUCCESS"
-    assert stored_body["stage"] == "completed"
-    assert stored_body["duration_ms"] is not None
-    assert stored_body["extracted_data"]["scheme"] == "American Express"
-    assert stored_body["extracted_data"]["card_last4"] == "1234"
-    assert extractor.captured_prompt == OCR_LOG_SYSTEM_PROMPT
+    assert stored_body["statusCode"] == 200
+    assert stored_body["message"] == "Success"
+    stored_data = stored_body["data"]
+    assert stored_data["status"] == "SUCCESS"
+    assert stored_data["stage"] == "completed"
+    assert stored_data["duration_ms"] is not None
+    assert "data" not in stored_data
+    assert stored_data["extracted_data"]["scheme"] == "American Express"
+    assert stored_data["extracted_data"]["card_last4"] == "1234"
 
 
 def test_post_cs_agent_receipt_rejects_non_https():
@@ -102,16 +113,37 @@ def test_cs_agent_receipt_records_ocr_failure():
             "/api/v1/cs-agent/receipts",
             json={"image_blob_url": "https://storage.example/receipt.pdf?sig=caller"},
         )
-        stored = client.get(f"/api/v1/cs-agent/receipts/{created.json()['id']}")
+        assert created.status_code == 200
+        created_body = created.json()
+        assert created_body["statusCode"] == 200
+        assert created_body["message"] == "Success"
+        data = created_body["data"]
+        assert data["status"] == "FAILED"
+        assert data["error_stage"] == "ocr"
+        assert "?redacted" in data["error_message"]
+        assert "sig=secret" not in data["error_message"]
+        assert "data" not in data
+        assert data["extracted_data"] == {
+            "error": "storage rejected the signature https://blob/file.pdf?redacted",
+            "stage": "ocr",
+        }
 
-    assert created.status_code == 202
+        stored = client.get(f"/api/v1/cs-agent/receipts/{data['id']}")
+
     assert stored.status_code == 200
     stored_body = stored.json()
-    assert stored_body["status"] == "FAILED"
-    assert stored_body["error_stage"] == "ocr"
-    assert "?redacted" in stored_body["error_message"]
-    assert "sig=secret" not in stored_body["error_message"]
-    assert stored_body["extracted_data"] == {
+    assert stored_body["statusCode"] == 200
+    assert stored_body["message"] == "Success"
+    stored_data = stored_body["data"]
+    assert stored_data["status"] == "FAILED"
+    assert stored_data["error_stage"] == "ocr"
+    assert "?redacted" in stored_data["error_message"]
+    assert "sig=secret" not in stored_data["error_message"]
+    assert "data" not in stored_data
+    assert stored_data["extracted_data"] == {
         "error": "storage rejected the signature https://blob/file.pdf?redacted",
         "stage": "ocr",
     }
+
+
+

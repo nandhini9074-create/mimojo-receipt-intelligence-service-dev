@@ -42,7 +42,7 @@ def _client(sas_token: str = "sig=env") -> TestClient:
 
 
 
-def test_post_accepts_the_slip_and_finishes_ocr_in_the_background():
+def test_post_accepts_the_slip_and_processes_synchronously():
     app = create_app(Settings(database_url="sqlite://", blob_sas_token="sig=env"))
     ocr = RecordingOcr()
     with TestClient(app) as client:
@@ -54,15 +54,18 @@ def test_post_accepts_the_slip_and_finishes_ocr_in_the_background():
                 "image_blob_url": "https://storage.example/receipts/receipt-123.pdf",
             },
         )
-        assert response.status_code == 202
+        assert response.status_code == 200
         body = response.json()
-        assert body["review_status"] == "NEW"
-        assert body["evidence_ready"] is False
-        assert body["evidence_file_url"] == "https://storage.example/receipts/receipt-123.pdf"
-        assert "sig=" not in body["evidence_file_url"]
+        assert body["statusCode"] == 200
+        assert body["message"] == "Success"
+        data = body["data"]
+        assert data["review_status"] == "NEW"
+        assert data["evidence_ready"] is True
+        assert data["evidence_file_url"] == "https://storage.example/receipts/receipt-123.pdf"
+        assert "sig=" not in data["evidence_file_url"]
         assert ocr.urls == ["https://storage.example/receipts/receipt-123.pdf?sig=env"]
 
-        stored = client.get(f"/api/v1/receipts/{body['id']}")
+        stored = client.get(f"/api/v1/receipts/{data['id']}")
 
     assert stored.status_code == 200
     assert stored.json()["evidence_ready"] is True
@@ -133,10 +136,13 @@ def test_background_failure_is_visible_on_the_saved_row():
                 "image_blob_url": "https://storage.example/receipt.pdf?sig=caller",
             },
         )
-        stored = client.get(f"/api/v1/receipts/{created.json()['id']}")
-
-    assert created.status_code == 202
-    assert created.json()["evidence_file_url"] == "https://storage.example/receipt.pdf"
+        assert created.status_code == 200
+        created_body = created.json()
+        assert created_body["statusCode"] == 200
+        assert created_body["message"] == "Success"
+        data = created_body["data"]
+        assert data["evidence_file_url"] == "https://storage.example/receipt.pdf"
+        stored = client.get(f"/api/v1/receipts/{data['id']}")
     assert stored.json()["evidence_ready"] is False
     assert stored.json()["extracted_data"]["stage"] == "ocr"
 

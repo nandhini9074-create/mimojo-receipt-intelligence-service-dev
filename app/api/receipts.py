@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.models.ocr_log_model import STAGE_INTAKE, STATUS_PENDING, OcrLog
@@ -8,11 +8,13 @@ from app.models.receipt_evidence import REVIEW_NEW, ReceiptEvidence
 from app.schemas.ocr_log_schema import (
     CreateOcrLogRequest,
     OcrLogAccepted,
+    OcrLogResponse,
     OcrLogView,
 )
 from app.schemas.receipt import (
     CreateReceiptRequest,
     ReceiptAccepted,
+    ReceiptAcceptedResponse,
     ReceiptEvidenceView,
 )
 from app.services.blob_url import BlobUrlError, access_url, storage_url
@@ -35,10 +37,9 @@ def get_db(request: Request):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/receipts", status_code=202, response_model=ReceiptAccepted)
+@router.post("/receipts", status_code=200, response_model=ReceiptAcceptedResponse)
 def create_receipt(
     body: CreateReceiptRequest,
-    background: BackgroundTasks,
     request: Request,
     db: Session = Depends(get_db),
 ):
@@ -74,22 +75,22 @@ def create_receipt(
     db.refresh(evidence_row)
     db.refresh(ocr_log_row)
 
-    background.add_task(
-        request.app.state.processor.run,
+    request.app.state.processor.run(
         evidence_row.id,
         readable,
         ocr_log_id=ocr_log_row.id,
     )
+    db.refresh(evidence_row)
     log.info(
-        "[API] receipt accepted",
+        "[API] receipt processed synchronously",
         extra=log_extra(
             evidence_id=str(evidence_row.id),
             jira_ticket_id=body.jira_ticket_id,
-            execution_step="intake",
-            status="accepted",
+            execution_step="receipt.process",
+            status="ready" if evidence_row.evidence_ready else "failed",
         ),
     )
-    return evidence_row
+    return ReceiptAcceptedResponse(statusCode=200, message="Success", data=evidence_row)
 
 
 @router.get("/receipts/{evidence_id}", response_model=ReceiptEvidenceView)
@@ -109,10 +110,9 @@ def get_receipt(evidence_id: uuid.UUID, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/cs-agent/receipts", status_code=202, response_model=OcrLogAccepted)
+@router.post("/cs-agent/receipts", status_code=200, response_model=OcrLogResponse)
 def create_cs_agent_receipt(
     body: CreateOcrLogRequest,
-    background: BackgroundTasks,
     request: Request,
     db: Session = Depends(get_db),
 ):
@@ -136,19 +136,20 @@ def create_cs_agent_receipt(
     db.commit()
     db.refresh(row)
 
-    background.add_task(request.app.state.ocr_log_processor.run, row.id, readable)
+    request.app.state.ocr_log_processor.run(row.id, readable)
+    db.refresh(row)
     log.info(
-        "[CsAgentAPI] receipt accepted",
+        "[CsAgentAPI] receipt processed synchronously",
         extra=log_extra(
             evidence_id=str(row.id),
-            execution_step="intake",
-            status="accepted",
+            execution_step="ocr_log.process",
+            status=row.status,
         ),
     )
-    return row
+    return OcrLogResponse(statusCode=200, message="Success", data=row)
 
 
-@router.get("/cs-agent/receipts/{id}", response_model=OcrLogView)
+@router.get("/cs-agent/receipts/{id}", response_model=OcrLogResponse)
 def get_cs_agent_receipt(id: uuid.UUID, db: Session = Depends(get_db)):
     row = db.get(OcrLog, id)
     if row is None:
@@ -157,4 +158,5 @@ def get_cs_agent_receipt(id: uuid.UUID, db: Session = Depends(get_db)):
             extra=log_extra(evidence_id=str(id), execution_step="read", status="not_found"),
         )
         raise HTTPException(status_code=404, detail="OCR log not found")
-    return row
+    return OcrLogResponse(statusCode=200, message="Success", data=row)
+
